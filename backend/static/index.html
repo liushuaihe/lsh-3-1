@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CIFAR-10 视觉模型可解释性沙盒 | Grad-CAM 交互可视化</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <div class="logo-icon">🔬</div>
+                    <div class="logo-text">
+                        <span class="logo-title">CIFAR-10 可解释性沙盒</span>
+                        <span class="logo-subtitle">Grad-CAM 注意力可视化交互平台</span>
+                    </div>
+                </div>
+                <div class="header-badge">
+                    <div class="status-dot"></div>
+                    <span>模型就绪</span>
+                </div>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <div class="content-grid">
+                <aside class="control-panel">
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div class="panel-icon">📤</div>
+                            <span class="panel-title">图像输入</span>
+                        </div>
+                        <div class="panel-body">
+                            <div class="upload-section">
+                                <div class="upload-area" id="uploadArea">
+                                    <div class="upload-icon">🖼️</div>
+                                    <div class="upload-text">点击或拖拽图片到此处</div>
+                                    <div class="upload-hint">支持 JPG、PNG 格式</div>
+                                    <button class="upload-btn" id="uploadBtn">选择图片</button>
+                                    <input type="file" id="fileInput" accept="image/*" style="display: none;">
+                                </div>
+                            </div>
+
+                            <div class="sample-images">
+                                <div class="section-label">
+                                    <span>✨</span>
+                                    <span>快速体验</span>
+                                </div>
+                                <div class="sample-grid" id="sampleGrid"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="panel" style="margin-top: 20px;">
+                        <div class="panel-header">
+                            <div class="panel-icon">🎚️</div>
+                            <span class="panel-title">注意力阈值</span>
+                        </div>
+                        <div class="panel-body">
+                            <div class="threshold-section">
+                                <div class="slider-container">
+                                    <div class="slider-header">
+                                        <span class="slider-label">显示阈值</span>
+                                        <span class="slider-value" id="sliderValue">50%</span>
+                                    </div>
+                                    <div class="slider-track">
+                                        <div class="slider-fill" id="sliderFill" style="width: 50%;"></div>
+                                        <input type="range" 
+                                               class="slider-input" 
+                                               id="thresholdSlider" 
+                                               min="0" 
+                                               max="1" 
+                                               step="0.01" 
+                                               value="0.5">
+                                    </div>
+                                    <div class="slider-marks">
+                                        <span>0%</span>
+                                        <span>50%</span>
+                                        <span>100%</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="info-section">
+                                <div class="info-item">
+                                    <span class="info-label">推理时间</span>
+                                    <span class="info-value" id="inferenceTime">--</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">图像尺寸</span>
+                                    <span class="info-value" id="imageSize">--</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="panel" style="margin-top: 20px;">
+                        <div class="panel-header">
+                            <div class="panel-icon">📊</div>
+                            <span class="panel-title">分类结果</span>
+                        </div>
+                        <div class="panel-body">
+                            <div class="results-section" id="resultsContainer">
+                                <div style="text-align: center; padding: 30px 0; color: var(--text-muted); font-size: 13px;">
+                                    上传图片后查看分类结果
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </aside>
+
+                <section class="visualization-panel panel">
+                    <div class="panel-header">
+                        <div class="panel-icon">👁️</div>
+                        <span class="panel-title">可视化展示</span>
+                    </div>
+                    <div class="panel-body">
+                        <div class="image-container" id="imageContainer">
+                            <div class="image-toolbar hidden" id="imageToolbar">
+                                <button class="toolbar-btn" id="downloadBtn" title="下载图片">⬇️</button>
+                            </div>
+
+                            <div class="placeholder-state" id="placeholderState">
+                                <div class="placeholder-icon">🎯</div>
+                                <div class="placeholder-title">开始探索模型注意力</div>
+                                <div class="placeholder-desc">
+                                    上传一张图片，或选择下方的示例图片，
+                                    实时观察 Grad-CAM 热力图如何揭示模型的注意力分布
+                                </div>
+                            </div>
+
+                            <div class="image-display hidden" id="imageDisplay"></div>
+
+                            <div class="view-toggle" id="viewToggle">
+                                <button class="view-toggle-btn" id="viewToggleOriginal">原图</button>
+                                <button class="view-toggle-btn active" id="viewToggleOverlay">叠加</button>
+                                <button class="view-toggle-btn" id="viewToggleHeatmap">热力图</button>
+                            </div>
+
+                            <div class="loading-overlay" id="loadingOverlay">
+                                <div class="spinner"></div>
+                                <div class="loading-text" id="loadingText">处理中...</div>
+                                <div class="loading-subtext" id="loadingSubtext"></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+
+        <footer class="footer">
+            <p class="footer-text">
+                基于 <strong>MobileNetV2</strong> 预训练模型 · 
+                <strong>Grad-CAM</strong> 注意力可视化 · 
+                纯 <strong>CPU</strong> 实时推理
+            </p>
+        </footer>
+    </div>
+
+    <div class="error-toast" id="errorToast"></div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
