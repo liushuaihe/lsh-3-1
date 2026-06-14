@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torchvision import models, transforms
 from PIL import Image
 import numpy as np
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 
 CIFAR10_CLASSES = [
     '飞机', '汽车', '鸟', '猫', '鹿',
@@ -66,23 +66,41 @@ class CIFAR10Classifier:
             image = image.convert('RGB')
         return self.transform(image).unsqueeze(0)
 
-    def predict(self, image: Image.Image) -> Tuple[List[str], List[float], torch.Tensor]:
+    def predict(self, image: Image.Image, target_class_idx: Optional[int] = None) -> Tuple[List[str], List[float], List[int], List[float], torch.Tensor]:
         self.model.zero_grad()
-        
+
         input_tensor = self.preprocess_image(image)
         input_tensor.requires_grad = True
-        
+
         with torch.set_grad_enabled(True):
             outputs = self.model(input_tensor)
             probabilities = F.softmax(outputs, dim=1)
-            
+
+            all_probs = probabilities[0].detach().cpu().numpy().tolist()
+            all_prob_values = [round(p * 100, 2) for p in all_probs]
+
             top_probs, top_indices = torch.topk(probabilities, 3)
             top_class_names = [CIFAR10_CLASSES[idx] for idx in top_indices[0].tolist()]
             top_prob_values = [round(p * 100, 2) for p in top_probs[0].tolist()]
-            
-            predicted_idx = top_indices[0][0]
+            top_class_indices = top_indices[0].tolist()
+
+            if target_class_idx is None:
+                target_class_idx = top_indices[0][0].item()
+
             target = torch.zeros_like(outputs)
-            target[0, predicted_idx] = 1
+            target[0, target_class_idx] = 1
             outputs.backward(gradient=target)
-        
-        return top_class_names, top_prob_values, input_tensor
+
+        return top_class_names, top_prob_values, top_class_indices, all_prob_values, input_tensor
+
+    def backprop_for_class(self, image: Image.Image, target_class_idx: int) -> None:
+        self.model.zero_grad()
+
+        input_tensor = self.preprocess_image(image)
+        input_tensor.requires_grad = True
+
+        with torch.set_grad_enabled(True):
+            outputs = self.model(input_tensor)
+            target = torch.zeros_like(outputs)
+            target[0, target_class_idx] = 1
+            outputs.backward(gradient=target)

@@ -40,9 +40,14 @@ class ClassificationResponse(BaseModel):
     success: bool
     classes: List[str]
     probabilities: List[float]
+    class_indices: List[int]
+    all_probabilities: List[float]
     original_image: str
     heatmap: List[List[float]]
     inference_time: float
+    inference_time_ms: float
+    heatmap_time_ms: float
+    total_time_ms: float
 
 class ThresholdRequest(BaseModel):
     threshold: float
@@ -52,6 +57,16 @@ class ThresholdRequest(BaseModel):
 class ThresholdResponse(BaseModel):
     success: bool
     overlay_image: str
+
+class GradCAMForClassRequest(BaseModel):
+    original_image: str
+    class_index: int
+
+class GradCAMForClassResponse(BaseModel):
+    success: bool
+    heatmap: List[List[float]]
+    heatmap_time_ms: float
+    class_name: str
 
 def encode_image_to_base64(image_array: np.ndarray) -> str:
     image = Image.fromarray(image_array.astype(np.uint8))
@@ -86,34 +101,43 @@ async def get_classes():
 async def classify_image(file: UploadFile = File(...)):
     if classifier is None or gradcam is None:
         raise HTTPException(status_code=503, detail="模型尚未加载完成，请稍后重试")
-    
+
     try:
-        start_time = time.time()
-        
+        total_start = time.time()
+
         image_data = await file.read()
         image = Image.open(io.BytesIO(image_data))
-        
+
         if image.mode != 'RGB':
             image = image.convert('RGB')
-        
-        classes, probabilities, _ = classifier.predict(image)
-        
+
+        inference_start = time.time()
+        classes, probabilities, class_indices, all_probabilities, _ = classifier.predict(image)
+        inference_time_ms = round((time.time() - inference_start) * 1000, 2)
+
+        heatmap_start = time.time()
         original, overlay, heatmap_full = gradcam.generate_overlay(image, threshold=0.5)
-        
+        heatmap_time_ms = round((time.time() - heatmap_start) * 1000, 2)
+
         original_base64 = encode_image_to_base64(original)
         heatmap_list = heatmap_full.tolist()
-        
-        inference_time = round((time.time() - start_time) * 1000, 2)
-        
+
+        total_time_ms = round((time.time() - total_start) * 1000, 2)
+
         return ClassificationResponse(
             success=True,
             classes=classes,
             probabilities=probabilities,
+            class_indices=class_indices,
+            all_probabilities=all_probabilities,
             original_image=original_base64,
             heatmap=heatmap_list,
-            inference_time=inference_time
+            inference_time=total_time_ms,
+            inference_time_ms=inference_time_ms,
+            heatmap_time_ms=heatmap_time_ms,
+            total_time_ms=total_time_ms
         )
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"图像处理失败: {str(e)}")
 
@@ -249,40 +273,88 @@ async def get_dataset_image(index: int):
 async def classify_dataset_image(index: int):
     if classifier is None or gradcam is None:
         raise HTTPException(status_code=503, detail="模型尚未加载完成，请稍后重试")
-    
+
     if not dataset.is_loaded():
         raise HTTPException(status_code=404, detail="尚未加载数据集")
-    
+
     try:
-        start_time = time.time()
-        
+        total_start = time.time()
+
         image_array, label, label_name = dataset.get_image(index)
         image = Image.fromarray(image_array)
-        
-        classes, probabilities, _ = classifier.predict(image)
-        
+
+        inference_start = time.time()
+        classes, probabilities, class_indices, all_probabilities, _ = classifier.predict(image)
+        inference_time_ms = round((time.time() - inference_start) * 1000, 2)
+
+        heatmap_start = time.time()
         original, overlay, heatmap_full = gradcam.generate_overlay(image, threshold=0.5)
-        
+        heatmap_time_ms = round((time.time() - heatmap_start) * 1000, 2)
+
         original_base64 = encode_image_to_base64(original)
         heatmap_list = heatmap_full.tolist()
-        
-        inference_time = round((time.time() - start_time) * 1000, 2)
-        
+
+        total_time_ms = round((time.time() - total_start) * 1000, 2)
+
         return {
             "success": True,
             "classes": classes,
             "probabilities": probabilities,
+            "class_indices": class_indices,
+            "all_probabilities": all_probabilities,
             "original_image": original_base64,
             "heatmap": heatmap_list,
-            "inference_time": inference_time,
+            "inference_time": total_time_ms,
+            "inference_time_ms": inference_time_ms,
+            "heatmap_time_ms": heatmap_time_ms,
+            "total_time_ms": total_time_ms,
             "true_label": label,
             "true_label_name": label_name
         }
-        
+
     except IndexError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"图像处理失败: {str(e)}")
+
+
+@app.post("/api/gradcam-for-class", response_model=GradCAMForClassResponse)
+async def generate_gradcam_for_class(request: GradCAMForClassRequest):
+    if classifier is None or gradcam is None:
+        raise HTTPException(status_code=503, detail="模型尚未加载完成，请稍后重试")
+
+    try:
+        image = decode_image_from_base64(request.original_image)
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+
+        class_index = request.class_index
+        if class_index < 0 or class_index >= len(CIFAR10_CLASSES):
+            raise HTTPException(status_code=400, detail="无效的类别索引")
+
+        heatmap_start = time.time()
+
+        classifier.backprop_for_class(image, class_index)
+
+        target_size = (224, 224)
+        heatmap = gradcam.generate_heatmap(image, target_size)
+
+        original_size = image.size
+        heatmap_resized = np.array(Image.fromarray(heatmap).resize(original_size))
+
+        heatmap_time_ms = round((time.time() - heatmap_start) * 1000, 2)
+
+        return GradCAMForClassResponse(
+            success=True,
+            heatmap=heatmap_resized.tolist(),
+            heatmap_time_ms=heatmap_time_ms,
+            class_name=CIFAR10_CLASSES[class_index]
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"热力图生成失败: {str(e)}")
 
 @app.post("/api/dataset/clear")
 async def clear_dataset():

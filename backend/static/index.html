@@ -8,6 +8,36 @@
 </head>
 <body>
     <div class="app-container">
+        <div class="perf-monitor" id="perfMonitor">
+            <div class="perf-header">
+                <span class="perf-icon">⚡</span>
+                <span class="perf-title">性能监控</span>
+            </div>
+            <div class="perf-body">
+                <div class="perf-item">
+                    <div class="perf-label">
+                        <span class="perf-dot perf-dot-blue"></span>
+                        模型推理
+                    </div>
+                    <div class="perf-value" id="perfInference">-- ms</div>
+                </div>
+                <div class="perf-item">
+                    <div class="perf-label">
+                        <span class="perf-dot perf-dot-purple"></span>
+                        热力计算
+                    </div>
+                    <div class="perf-value" id="perfHeatmap">-- ms</div>
+                </div>
+                <div class="perf-item perf-total">
+                    <div class="perf-label">
+                        <span class="perf-dot perf-dot-green"></span>
+                        总耗时
+                    </div>
+                    <div class="perf-value" id="perfTotal">-- ms</div>
+                </div>
+            </div>
+        </div>
+
         <header class="header">
             <div class="header-content">
                 <div class="logo">
@@ -140,13 +170,20 @@
                     <div class="panel" style="margin-top: 20px;">
                         <div class="panel-header">
                             <div class="panel-icon">📊</div>
-                            <span class="panel-title">分类结果</span>
+                            <span class="panel-title">分类结果 · Top-3</span>
+                            <div class="panel-hint" id="classSwitchHint" style="display:none; margin-left:auto; font-size:11px; color:var(--text-muted);">
+                                点击标签切换热力图
+                            </div>
                         </div>
                         <div class="panel-body">
                             <div class="results-section" id="resultsContainer">
                                 <div style="text-align: center; padding: 30px 0; color: var(--text-muted); font-size: 13px;">
                                     上传图片后查看分类结果
                                 </div>
+                            </div>
+                            <div class="probability-chart" id="probabilityChart" style="display:none;">
+                                <div class="chart-title">全类别概率分布</div>
+                                <div class="chart-bars" id="chartBars"></div>
                             </div>
                         </div>
                     </div>

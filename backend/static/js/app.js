@@ -1,10 +1,23 @@
+const CIFAR10_CLASSES_LOCAL = [
+    '飞机', '汽车', '鸟', '猫', '鹿',
+    '狗', '青蛙', '马', '船', '卡车'
+];
+
 const AppState = {
     originalImage: null,
     heatmapData: null,
     currentThreshold: 0.5,
     viewMode: 'overlay',
     classificationResults: null,
+    classIndices: null,
+    allProbabilities: null,
+    selectedClassIndex: null,
     isProcessing: false,
+    performance: {
+        inferenceMs: null,
+        heatmapMs: null,
+        totalMs: null
+    },
     dataset: {
         loaded: false,
         info: null,
@@ -47,12 +60,21 @@ function initElements() {
     elements.imageToolbar = document.getElementById('imageToolbar');
     elements.downloadBtn = document.getElementById('downloadBtn');
     elements.errorToast = document.getElementById('errorToast');
-    
+
+    elements.probabilityChart = document.getElementById('probabilityChart');
+    elements.chartBars = document.getElementById('chartBars');
+    elements.classSwitchHint = document.getElementById('classSwitchHint');
+
+    elements.perfMonitor = document.getElementById('perfMonitor');
+    elements.perfInference = document.getElementById('perfInference');
+    elements.perfHeatmap = document.getElementById('perfHeatmap');
+    elements.perfTotal = document.getElementById('perfTotal');
+
     elements.inputTabs = document.querySelectorAll('.input-tab');
     elements.tabContents = document.querySelectorAll('.tab-content');
     elements.vizTabs = document.querySelectorAll('.viz-tab');
     elements.vizContents = document.querySelectorAll('.viz-content');
-    
+
     elements.datasetUploadArea = document.getElementById('datasetUploadArea');
     elements.datasetFileInput = document.getElementById('datasetFileInput');
     elements.datasetUploadBtn = document.getElementById('datasetUploadBtn');
@@ -60,7 +82,7 @@ function initElements() {
     elements.datasetStats = document.getElementById('datasetStats');
     elements.browseDatasetBtn = document.getElementById('browseDatasetBtn');
     elements.clearDatasetBtn = document.getElementById('clearDatasetBtn');
-    
+
     elements.browserGrid = document.getElementById('browserGrid');
     elements.browserInfo = document.getElementById('browserInfo');
     elements.browserPagination = document.getElementById('browserPagination');
@@ -250,7 +272,7 @@ async function processFile(file) {
 
     try {
         showLoading('正在分析图片...', '模型推理中');
-        
+
         const formData = new FormData();
         formData.append('file', file);
 
@@ -264,7 +286,7 @@ async function processFile(file) {
         }
 
         const data = await response.json();
-        
+
         if (!data.success) {
             throw new Error('分类失败');
         }
@@ -272,17 +294,23 @@ async function processFile(file) {
         AppState.classificationResults = data;
         AppState.heatmapData = data.heatmap;
         AppState.originalImage = data.original_image;
+        AppState.classIndices = data.class_indices;
+        AppState.allProbabilities = data.all_probabilities;
+        AppState.selectedClassIndex = data.class_indices ? data.class_indices[0] : null;
 
-        updateResults(data.classes, data.probabilities);
-        
+        updateResults(data.classes, data.probabilities, data.class_indices);
+        renderProbabilityChart(data.all_probabilities, data.class_indices);
+        updatePerformanceMonitor(data.inference_time_ms, data.heatmap_time_ms, data.total_time_ms);
+
         await renderImage(data.original_image, data.heatmap);
-        
-        updateInfo(data.inference_time, file.name);
-        
+
+        updateInfo(data.inference_time_ms, file.name);
+
         elements.placeholderState.classList.add('hidden');
         elements.imageDisplay.classList.remove('hidden');
         elements.imageToolbar.classList.remove('hidden');
-        
+        elements.classSwitchHint.style.display = 'inline-flex';
+
     } catch (error) {
         showError('图片处理失败：' + error.message);
         console.error('Classification error:', error);
@@ -436,28 +464,166 @@ function setViewMode(mode) {
     drawOverlay();
 }
 
-function updateResults(classes, probabilities) {
+function updateResults(classes, probabilities, classIndices) {
     elements.resultsContainer.innerHTML = '';
-    
+
     classes.forEach((cls, index) => {
         const prob = probabilities[index];
+        const classIdx = classIndices ? classIndices[index] : null;
+        const isSelected = classIdx !== null && classIdx === AppState.selectedClassIndex;
         const item = document.createElement('div');
-        item.className = `result-item ${index === 0 ? 'top-1' : ''}`;
+        item.className = `result-item clickable ${index === 0 ? 'top-1' : ''} ${isSelected ? 'active-class' : ''}`;
+        item.dataset.classIndex = classIdx;
         item.innerHTML = `
             <div class="result-rank">${index + 1}</div>
             <div class="result-class">${cls}</div>
             <div class="result-bar">
-                <div class="result-bar-fill" style="width: ${prob}%"></div>
+                <div class="result-bar-fill" style="width: 0%"></div>
             </div>
             <div class="result-prob">${prob.toFixed(1)}%</div>
+            <div class="result-action" title="查看该类别的热力图">
+                <span class="action-icon">🔥</span>
+            </div>
         `;
+        item.addEventListener('click', () => {
+            if (classIdx !== null) {
+                switchClassHeatmap(classIdx);
+            }
+        });
         elements.resultsContainer.appendChild(item);
+
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                const barFill = item.querySelector('.result-bar-fill');
+                if (barFill) {
+                    barFill.style.width = prob + '%';
+                }
+            });
+        });
     });
+}
+
+function renderProbabilityChart(allProbabilities, topClassIndices) {
+    if (!allProbabilities || allProbabilities.length === 0) {
+        elements.probabilityChart.style.display = 'none';
+        return;
+    }
+
+    elements.probabilityChart.style.display = 'block';
+    elements.chartBars.innerHTML = '';
+
+    const topIndices = new Set(topClassIndices || []);
+    const maxProb = Math.max(...allProbabilities);
+
+    allProbabilities.forEach((prob, idx) => {
+        const bar = document.createElement('div');
+        bar.className = `chart-bar ${topIndices.has(idx) ? 'is-top' : ''} ${idx === AppState.selectedClassIndex ? 'active' : ''}`;
+        bar.dataset.classIndex = idx;
+
+        const heightPercent = maxProb > 0 ? (prob / maxProb) * 100 : 0;
+
+        const valueTooltip = prob >= 1 ? prob.toFixed(1) + '%' : prob.toFixed(2) + '%';
+
+        bar.innerHTML = `
+            <div class="chart-bar-value" style="height: ${Math.max(heightPercent, 2)}%" title="${valueTooltip}"></div>
+            <div class="chart-bar-label">${CIFAR10_CLASSES_LOCAL[idx]}</div>
+        `;
+
+        bar.addEventListener('click', () => switchClassHeatmap(idx));
+        elements.chartBars.appendChild(bar);
+    });
+}
+
+function updatePerformanceMonitor(inferenceMs, heatmapMs, totalMs) {
+    AppState.performance.inferenceMs = inferenceMs;
+    AppState.performance.heatmapMs = heatmapMs;
+    AppState.performance.totalMs = totalMs;
+
+    if (inferenceMs !== undefined && inferenceMs !== null) {
+        elements.perfInference.textContent = inferenceMs + ' ms';
+    }
+    if (heatmapMs !== undefined && heatmapMs !== null) {
+        elements.perfHeatmap.textContent = heatmapMs + ' ms';
+    }
+    if (totalMs !== undefined && totalMs !== null) {
+        elements.perfTotal.textContent = totalMs + ' ms';
+    }
+
+    elements.perfMonitor.classList.add('pulse');
+    setTimeout(() => {
+        elements.perfMonitor.classList.remove('pulse');
+    }, 600);
+}
+
+async function switchClassHeatmap(classIndex) {
+    if (!AppState.originalImage || classIndex === null || classIndex === undefined) {
+        return;
+    }
+
+    if (AppState.selectedClassIndex === classIndex) {
+        return;
+    }
+
+    try {
+        showLoading(
+            `切换至「${CIFAR10_CLASSES_LOCAL[classIndex]}」热力图`,
+            '重新计算 Grad-CAM...'
+        );
+
+        const response = await fetch('/api/gradcam-for-class', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                original_image: AppState.originalImage,
+                class_index: classIndex
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('服务器响应错误');
+        }
+
+        const data = await response.json();
+        if (!data.success) {
+            throw new Error('热力图生成失败');
+        }
+
+        AppState.selectedClassIndex = classIndex;
+        AppState.heatmapData = data.heatmap;
+
+        updatePerformanceMonitor(
+            AppState.performance.inferenceMs,
+            data.heatmap_time_ms,
+            (AppState.performance.inferenceMs || 0) + data.heatmap_time_ms
+        );
+
+        const resultItems = elements.resultsContainer.querySelectorAll('.result-item');
+        resultItems.forEach(item => {
+            const idx = parseInt(item.dataset.classIndex, 10);
+            item.classList.toggle('active-class', idx === classIndex);
+        });
+
+        const chartBars = elements.chartBars.querySelectorAll('.chart-bar');
+        chartBars.forEach(bar => {
+            const idx = parseInt(bar.dataset.classIndex, 10);
+            bar.classList.toggle('active', idx === classIndex);
+        });
+
+        drawOverlay();
+
+    } catch (error) {
+        showError('热力图切换失败：' + error.message);
+        console.error('GradCAM switch error:', error);
+    } finally {
+        hideLoading();
+    }
 }
 
 function updateInfo(inferenceTime, fileName) {
     elements.inferenceTime.textContent = inferenceTime + ' ms';
-    
+
     if (AppState.imageWidth && AppState.imageHeight) {
         elements.imageSize.textContent = `${AppState.imageWidth} × ${AppState.imageHeight}`;
     }
@@ -673,7 +839,7 @@ function updateBrowserInfo(total) {
 async function classifyDatasetImage(index) {
     try {
         showLoading('正在分析图片...', '模型推理中');
-        
+
         const response = await fetch(`/api/dataset/classify/${index}`, {
             method: 'POST'
         });
@@ -683,7 +849,7 @@ async function classifyDatasetImage(index) {
         }
 
         const data = await response.json();
-        
+
         if (!data.success) {
             throw new Error('分类失败');
         }
@@ -691,19 +857,25 @@ async function classifyDatasetImage(index) {
         AppState.classificationResults = data;
         AppState.heatmapData = data.heatmap;
         AppState.originalImage = data.original_image;
+        AppState.classIndices = data.class_indices;
+        AppState.allProbabilities = data.all_probabilities;
+        AppState.selectedClassIndex = data.class_indices ? data.class_indices[0] : null;
 
-        updateResults(data.classes, data.probabilities);
-        
+        updateResults(data.classes, data.probabilities, data.class_indices);
+        renderProbabilityChart(data.all_probabilities, data.class_indices);
+        updatePerformanceMonitor(data.inference_time_ms, data.heatmap_time_ms, data.total_time_ms);
+
         await renderImage(data.original_image, data.heatmap);
-        
-        updateInfo(data.inference_time, `#${index}`);
-        
+
+        updateInfo(data.inference_time_ms, `#${index}`);
+
         elements.placeholderState.classList.add('hidden');
         elements.imageDisplay.classList.remove('hidden');
         elements.imageToolbar.classList.remove('hidden');
-        
+        elements.classSwitchHint.style.display = 'inline-flex';
+
         switchVizTab('visualize');
-        
+
     } catch (error) {
         showError('图片分析失败：' + error.message);
         console.error('Dataset classify error:', error);
