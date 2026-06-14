@@ -13,6 +13,7 @@ import time
 
 from model.classifier import CIFAR10Classifier, CIFAR10_CLASSES
 from model.gradcam import GradCAM
+from model.dataset import CIFAR10Dataset
 
 app = FastAPI(
     title="CIFAR-10 视觉模型可解释性沙盒",
@@ -33,6 +34,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 classifier: Optional[CIFAR10Classifier] = None
 gradcam: Optional[GradCAM] = None
+dataset: CIFAR10Dataset = CIFAR10Dataset()
 
 class ClassificationResponse(BaseModel):
     success: bool
@@ -163,6 +165,132 @@ async def apply_threshold(request: ThresholdRequest):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"阈值处理失败: {str(e)}")
+
+@app.post("/api/dataset/upload")
+async def upload_dataset(file: UploadFile = File(...)):
+    try:
+        file_content = await file.read()
+        
+        dataset_info = dataset.load_from_file(file_content, file.filename)
+        
+        return {
+            "success": True,
+            "dataset": {
+                "name": dataset_info.name,
+                "total_images": dataset_info.total_images,
+                "num_classes": dataset_info.num_classes,
+                "label_names": dataset_info.label_names,
+                "class_counts": dataset_info.class_counts,
+                "format": dataset_info.format
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"数据集加载失败: {str(e)}")
+
+@app.get("/api/dataset/info")
+async def get_dataset_info():
+    if not dataset.is_loaded():
+        return {
+            "success": False,
+            "message": "尚未加载数据集"
+        }
+    
+    try:
+        info = dataset._get_info()
+        return {
+            "success": True,
+            "dataset": {
+                "name": info.name,
+                "total_images": info.total_images,
+                "num_classes": info.num_classes,
+                "label_names": info.label_names,
+                "class_counts": info.class_counts,
+                "format": info.format
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/dataset/images")
+async def get_dataset_images(page: int = 1, per_page: int = 50, label: Optional[int] = None):
+    if not dataset.is_loaded():
+        raise HTTPException(status_code=404, detail="尚未加载数据集")
+    
+    try:
+        result = dataset.get_images_paginated(
+            page=page,
+            per_page=per_page,
+            label_filter=label
+        )
+        return {
+            "success": True,
+            **result
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取图片列表失败: {str(e)}")
+
+@app.get("/api/dataset/image/{index}")
+async def get_dataset_image(index: int):
+    if not dataset.is_loaded():
+        raise HTTPException(status_code=404, detail="尚未加载数据集")
+    
+    try:
+        result = dataset.get_image_high_res(index)
+        return {
+            "success": True,
+            **result
+        }
+    except IndexError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取图片失败: {str(e)}")
+
+@app.post("/api/dataset/classify/{index}")
+async def classify_dataset_image(index: int):
+    if classifier is None or gradcam is None:
+        raise HTTPException(status_code=503, detail="模型尚未加载完成，请稍后重试")
+    
+    if not dataset.is_loaded():
+        raise HTTPException(status_code=404, detail="尚未加载数据集")
+    
+    try:
+        start_time = time.time()
+        
+        image_array, label, label_name = dataset.get_image(index)
+        image = Image.fromarray(image_array)
+        
+        classes, probabilities, _ = classifier.predict(image)
+        
+        original, overlay, heatmap_full = gradcam.generate_overlay(image, threshold=0.5)
+        
+        original_base64 = encode_image_to_base64(original)
+        heatmap_list = heatmap_full.tolist()
+        
+        inference_time = round((time.time() - start_time) * 1000, 2)
+        
+        return {
+            "success": True,
+            "classes": classes,
+            "probabilities": probabilities,
+            "original_image": original_base64,
+            "heatmap": heatmap_list,
+            "inference_time": inference_time,
+            "true_label": label,
+            "true_label_name": label_name
+        }
+        
+    except IndexError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"图像处理失败: {str(e)}")
+
+@app.post("/api/dataset/clear")
+async def clear_dataset():
+    dataset.clear()
+    return {
+        "success": True,
+        "message": "数据集已清除"
+    }
 
 if __name__ == "__main__":
     import uvicorn

@@ -32,23 +32,64 @@
                             <div class="panel-icon">📤</div>
                             <span class="panel-title">图像输入</span>
                         </div>
+                        <div class="input-tabs">
+                            <button class="input-tab active" data-tab="single">单张图片</button>
+                            <button class="input-tab" data-tab="dataset">数据集</button>
+                        </div>
                         <div class="panel-body">
-                            <div class="upload-section">
-                                <div class="upload-area" id="uploadArea">
-                                    <div class="upload-icon">🖼️</div>
-                                    <div class="upload-text">点击或拖拽图片到此处</div>
-                                    <div class="upload-hint">支持 JPG、PNG 格式</div>
-                                    <button class="upload-btn" id="uploadBtn">选择图片</button>
-                                    <input type="file" id="fileInput" accept="image/*" style="display: none;">
+                            <div class="tab-content active" id="tabSingle">
+                                <div class="upload-section">
+                                    <div class="upload-area" id="uploadArea">
+                                        <div class="upload-icon">🖼️</div>
+                                        <div class="upload-text">点击或拖拽图片到此处</div>
+                                        <div class="upload-hint">支持 JPG、PNG 格式</div>
+                                        <button class="upload-btn" id="uploadBtn">选择图片</button>
+                                        <input type="file" id="fileInput" accept="image/*" style="display: none;">
+                                    </div>
+                                </div>
+
+                                <div class="sample-images">
+                                    <div class="section-label">
+                                        <span>✨</span>
+                                        <span>快速体验</span>
+                                    </div>
+                                    <div class="sample-grid" id="sampleGrid"></div>
                                 </div>
                             </div>
 
-                            <div class="sample-images">
-                                <div class="section-label">
-                                    <span>✨</span>
-                                    <span>快速体验</span>
+                            <div class="tab-content" id="tabDataset">
+                                <div class="upload-section">
+                                    <div class="upload-area dataset-upload" id="datasetUploadArea">
+                                        <div class="upload-icon">📁</div>
+                                        <div class="upload-text">上传 CIFAR-10 数据集</div>
+                                        <div class="upload-hint">支持 .tar.gz、.zip 格式的 Python pickle 或二进制数据集</div>
+                                        <button class="upload-btn" id="datasetUploadBtn">选择数据集</button>
+                                        <input type="file" id="datasetFileInput" accept=".tar.gz,.tgz,.zip,.bin" style="display: none;">
+                                    </div>
                                 </div>
-                                <div class="sample-grid" id="sampleGrid"></div>
+
+                                <div class="dataset-info hidden" id="datasetInfo">
+                                    <div class="section-label">
+                                        <span>📊</span>
+                                        <span>数据集概览</span>
+                                    </div>
+                                    <div class="dataset-stats" id="datasetStats"></div>
+                                    <div class="dataset-actions">
+                                        <button class="btn-secondary" id="browseDatasetBtn">浏览数据集</button>
+                                        <button class="btn-danger" id="clearDatasetBtn">清除数据集</button>
+                                    </div>
+                                </div>
+
+                                <div class="dataset-upload-hint">
+                                    <div class="section-label">
+                                        <span>💡</span>
+                                        <span>提示</span>
+                                    </div>
+                                    <p class="hint-text">
+                                        CIFAR-10 数据集包含 60,000 张 32×32 的彩色图片，分为 10 个类别。
+                                        可以从 <a href="https://www.cs.toronto.edu/~kriz/cifar.html" target="_blank">官方网站</a> 下载。
+                                    </p>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -115,34 +156,72 @@
                     <div class="panel-header">
                         <div class="panel-icon">👁️</div>
                         <span class="panel-title">可视化展示</span>
+                        <div class="viz-tabs">
+                            <button class="viz-tab active" data-viz="visualize">可视化</button>
+                            <button class="viz-tab" data-viz="dataset">数据集浏览</button>
+                        </div>
                     </div>
                     <div class="panel-body">
-                        <div class="image-container" id="imageContainer">
-                            <div class="image-toolbar hidden" id="imageToolbar">
-                                <button class="toolbar-btn" id="downloadBtn" title="下载图片">⬇️</button>
-                            </div>
+                        <div class="viz-content active" id="vizVisualize">
+                            <div class="image-container" id="imageContainer">
+                                <div class="image-toolbar hidden" id="imageToolbar">
+                                    <button class="toolbar-btn" id="downloadBtn" title="下载图片">⬇️</button>
+                                </div>
 
-                            <div class="placeholder-state" id="placeholderState">
-                                <div class="placeholder-icon">🎯</div>
-                                <div class="placeholder-title">开始探索模型注意力</div>
-                                <div class="placeholder-desc">
-                                    上传一张图片，或选择下方的示例图片，
-                                    实时观察 Grad-CAM 热力图如何揭示模型的注意力分布
+                                <div class="placeholder-state" id="placeholderState">
+                                    <div class="placeholder-icon">🎯</div>
+                                    <div class="placeholder-title">开始探索模型注意力</div>
+                                    <div class="placeholder-desc">
+                                        上传一张图片，或选择下方的示例图片，
+                                        实时观察 Grad-CAM 热力图如何揭示模型的注意力分布
+                                    </div>
+                                </div>
+
+                                <div class="image-display hidden" id="imageDisplay"></div>
+
+                                <div class="view-toggle" id="viewToggle">
+                                    <button class="view-toggle-btn" id="viewToggleOriginal">原图</button>
+                                    <button class="view-toggle-btn active" id="viewToggleOverlay">叠加</button>
+                                    <button class="view-toggle-btn" id="viewToggleHeatmap">热力图</button>
+                                </div>
+
+                                <div class="loading-overlay" id="loadingOverlay">
+                                    <div class="spinner"></div>
+                                    <div class="loading-text" id="loadingText">处理中...</div>
+                                    <div class="loading-subtext" id="loadingSubtext"></div>
                                 </div>
                             </div>
+                        </div>
 
-                            <div class="image-display hidden" id="imageDisplay"></div>
-
-                            <div class="view-toggle" id="viewToggle">
-                                <button class="view-toggle-btn" id="viewToggleOriginal">原图</button>
-                                <button class="view-toggle-btn active" id="viewToggleOverlay">叠加</button>
-                                <button class="view-toggle-btn" id="viewToggleHeatmap">热力图</button>
-                            </div>
-
-                            <div class="loading-overlay" id="loadingOverlay">
-                                <div class="spinner"></div>
-                                <div class="loading-text" id="loadingText">处理中...</div>
-                                <div class="loading-subtext" id="loadingSubtext"></div>
+                        <div class="viz-content" id="vizDataset">
+                            <div class="dataset-browser">
+                                <div class="browser-header">
+                                    <div class="browser-info" id="browserInfo">
+                                        请先上传数据集
+                                    </div>
+                                    <div class="browser-controls">
+                                        <select id="classFilter" class="class-filter">
+                                            <option value="">全部类别</option>
+                                        </select>
+                                        <select id="perPageSelect" class="per-page-select">
+                                            <option value="30">30 张/页</option>
+                                            <option value="50" selected>50 张/页</option>
+                                            <option value="100">100 张/页</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="browser-grid" id="browserGrid">
+                                    <div class="grid-placeholder">
+                                        <div class="placeholder-icon">🖼️</div>
+                                        <div class="placeholder-title">暂无数据</div>
+                                        <div class="placeholder-desc">上传数据集后即可浏览图片</div>
+                                    </div>
+                                </div>
+                                <div class="browser-pagination hidden" id="browserPagination">
+                                    <button class="page-btn" id="prevPageBtn">上一页</button>
+                                    <span class="page-info" id="pageInfo">第 1 页 / 共 1 页</span>
+                                    <button class="page-btn" id="nextPageBtn">下一页</button>
+                                </div>
                             </div>
                         </div>
                     </div>
